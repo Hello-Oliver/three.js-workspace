@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>three.js - kinect</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <style>
+        body {
+            font-family: Monospace;
+            background-color: #000000;
+            margin: 0px;
+            overflow: hidden;
+        }
+
+        #info {
+            color: #ffffff;
+
+            font-family: Monospace;
+            font-size: 13px;
+            text-align: center;
+            font-weight: bold;
+
+            position: absolute;
+            top: 5px; width: 100%;
+        }
+
+        a {
+            color: #0040ff;
+        }
+    </style>
+</head>
+<body>
+
+<script src="three.js"></script>
+<script src='dat.gui.min.js'></script>
+<script src="stats.min.js"></script>
+<script src="WebGL.js"></script>
+
+<script id="vs" type="x-shader/x-vertex">
+
+			uniform sampler2D map;
+
+			uniform float width;
+			uniform float height;
+			uniform float nearClipping, farClipping;
+
+			uniform float pointSize;
+			uniform float zOffset;
+
+			varying vec2 vUv;
+
+			const float XtoZ = 1.11146; // tan( 1.0144686 / 2.0 ) * 2.0;
+			const float YtoZ = 0.83359; // tan( 0.7898090 / 2.0 ) * 2.0;
+
+			void main() {
+
+				vUv = vec2( position.x / width, position.y / height );
+
+				vec4 color = texture2D( map, vUv );
+				float depth = ( color.r + color.g + color.b ) / 3.0;
+
+				// Projection code by @kcmic
+
+				float z = ( 1.0 - depth ) * (farClipping - nearClipping) + nearClipping;
+
+				vec4 pos = vec4(
+					( position.x / width - 0.5 ) * z * XtoZ,
+					( position.y / height - 0.5 ) * z * YtoZ,
+					- z + zOffset,
+					1.0);
+
+				gl_PointSize = pointSize;
+				gl_Position = projectionMatrix * modelViewMatrix * pos;
+
+			}
+
+		</script>
+
+<script id="fs" type="x-shader/x-fragment">
+
+			uniform sampler2D map;
+
+			varying vec2 vUv;
+
+			void main() {
+
+				vec4 color = texture2D( map, vUv );
+				gl_FragColor = vec4( color.r, color.g, color.b, 0.2 );
+
+			}
+
+		</script>
+
+<script>
+
+    var main_color = 0x000000;
+    var time = 0;
+    var canvas_height = window.innerHeight;
+    var canvas_width = window.innerWidth;
+    var scanMesh;
+    var loader = new THREE.JSONLoader();
+    //__________ scene
+    var scene = new THREE.Scene();
+
+    //__________ camera
+    var camHelper = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial());
+    camHelper.visible = false;
+    scene.add(camHelper);
+    var camera = new THREE.PerspectiveCamera(55, canvas_width / canvas_height, 0.1, 1000);
+
+    camera.position.set(0, 50, 150);
+    camHelper.add(camera);
+    //__________ renderer
+
+    var renderer = new THREE.WebGLRenderer({
+        alpha: true,
+        antialias: true
+    });
+    renderer.setSize(canvas_width, canvas_height);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.setClearColor(main_color, 1);
+
+    document.body.appendChild(renderer.domElement);
+
+    //__________ resize
+
+    window.onresize = function() {
+        canvas_height = window.innerHeight;
+        canvas_width = window.innerWidth;
+        camera.aspect = canvas_width / canvas_height;
+        camera.updateProjectionMatrix();
+        renderer.setSize(canvas_width, canvas_height);
+    }
+
+    //__________ controls
+
+    controls = new THREE.OrbitControls(camera);
+    controls.damping = 0.2;
+    controls.target = new THREE.Vector3(0, 20, 0);
+
+
+    //__________ light
+    var light = new THREE.HemisphereLight(0xACC5E1, 0x1588C8, 1);
+    light.intensity = .1;
+    scene.add(light);
+    var ambient = new THREE.AmbientLight(0x333333);
+    scene.add(ambient);
+
+    var spotLight = new THREE.SpotLight(16777215);
+    spotLight.position.set(0, 100, 20);
+    spotLight.castShadow = true;
+    spotLight.shadow.mapSize.width = 1024;
+    spotLight.shadow.mapSize.height = 1024;
+
+    spotLight.shadow.camera.left = 50;
+    spotLight.shadow.camera.right = 50;
+    spotLight.shadow.camera.top = 50;
+    spotLight.shadow.camera.bottom = 50;
+    scene.add(spotLight);
+
+    //__________ cubes
+
+    loader.load('textures/kinect.webm', function(geometry) {
+        var material = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            shading: THREE.FlatShading,
+            skinning: true,
+            metalness: 0.0,
+            roughness: .9
+        });
+
+        scanMesh = new THREE.SkinnedMesh(geometry, new THREE.MeshFaceMaterial([material]));
+        scanMesh.receiveShadow = true;
+        scanMesh.castShadow = true;
+        scene.add(scanMesh);
+
+    });
+
+
+
+    //__________ render
+    var render = function(time) {
+        requestAnimationFrame(render);
+        controls.update();
+        animation(time);
+        renderer.render(scene, camera);
+    };
+
+    var facX = Math.random() * 10 * .001;
+    var facY = Math.random() * 10 * .001;
+    var facZ = Math.random() * 10 * .001;
+    //__________ animation
+
+    function animation(time) {
+
+        camHelper.rotateY(-.01);
+        if (typeof scanMesh != "undefined") {
+            scanMesh.skeleton.bones[1].rotation.y = (Math.cos(0.005 + (facY) * time) * .3);
+            scanMesh.skeleton.bones[1].rotation.x = (Math.cos(0.005 + (facX) * time) * .3);
+            scanMesh.skeleton.bones[1].rotation.z = (Math.sin(0.004 + (facZ) * time) * .3);
+        }
+    };
+
+    //__________
+
+    render(time);
+
+</script>
+</body>
+</html>
